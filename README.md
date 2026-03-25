@@ -95,6 +95,7 @@ List jobs:
 jenkins jobs ls
 jenkins jobs ls team-folder --recursive
 jenkins jobs info team-folder/app-build
+jenkins jobs info team-folder/app-build --parameters
 ```
 
 Inspect builds:
@@ -115,6 +116,10 @@ jenkins build trigger team-folder/app-build \
 jenkins build trigger team-folder/app-build \
   --params-json '{"ENV":"staging","VERSION":"latest"}' \
   --wait
+jenkins build trigger team-folder/app-build \
+  --param ENV=staging \
+  --wait \
+  --progress
 ```
 
 Logs and waiting:
@@ -123,7 +128,12 @@ Logs and waiting:
 jenkins build logs team-folder/app-build#123
 jenkins build logs queue:123 --follow
 jenkins wait queue:123
+jenkins wait queue:123 --progress
 ```
+
+`jenkins jobs info --parameters` includes parameter definitions with name, type, default value, choices, and description when Jenkins exposes them.
+
+`--progress` streams wait-state updates to stderr while keeping the final result on stdout. Queue waits show the current reason, started builds show the build number and URL, running builds show elapsed versus estimated time, and finished builds show the final result.
 
 Accepted ref formats for `build info`, `build logs`, `wait`, and `result`:
 

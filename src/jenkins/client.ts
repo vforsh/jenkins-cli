@@ -2,7 +2,31 @@ import { CliError, ExitCode } from "../cli/errors.ts";
 import type { EffectiveConfig } from "../config/effective.ts";
 import { extractQueueId, formatBuildRef, jobPathToApiPath, normalizeJobPath, parseRef } from "./ref.ts";
 import { ensureTrailingSlash, isContainerJob, normalizeBuild, normalizeBuildInfo, normalizeJob, sleep, truncate } from "./helpers.ts";
-import type { BuildApiInfo, BuildApiSummary, JobApiSummary, QueueItem, RequestOptions } from "./types.ts";
+import { normalizeJobParameterDefinitions } from "./job-parameters.ts";
+import {
+	createFinishedWaitEvent,
+	createQueueWaitEvent,
+	createRunningWaitEvent,
+	createStartedWaitEvent,
+	queueWaitEventKey,
+	runningWaitEventKey,
+} from "./wait-events.ts";
+import type {
+	BuildApiInfo,
+	BuildApiSummary,
+	JobApiProperty,
+	JobApiSummary,
+	NormalizedBuildInfo,
+	NormalizedBuildSummary,
+	NormalizedJob,
+	NormalizedJobInfo,
+	QueueItem,
+	RequestOptions,
+	WaitOptions,
+} from "./types.ts";
+
+const DEFAULT_WAIT_INTERVAL_MS = 2_000;
+const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60_000;
 
 export class JenkinsClient {
 	private readonly endpoint: string;
@@ -31,11 +55,11 @@ export class JenkinsClient {
 		};
 	}
 
-	async listJobs(parentJobPath?: string, recursive = false): Promise<Array<Record<string, unknown>>> {
+	async listJobs(parentJobPath?: string, recursive = false): Promise<NormalizedJob[]> {
 		const rootPath = parentJobPath ? normalizeJobPath(parentJobPath) : undefined;
-		const jobs = await this.fetchJobs(rootPath);
 
 		if (!recursive) {
+			const jobs = await this.fetchJobs(rootPath);
 			return jobs.map(normalizeJob);
 		}
 
@@ -56,16 +80,33 @@ export class JenkinsClient {
 		return allJobs.map(normalizeJob);
 	}
 
-	async getJobInfo(jobPathInput: string): Promise<Record<string, unknown>> {
+	async getJobInfo(
+		jobPathInput: string,
+		options: { includeParameters?: boolean } = {},
+	): Promise<NormalizedJobInfo> {
 		const jobPath = normalizeJobPath(jobPathInput);
+		const includeParameters = options.includeParameters ?? false;
 		const data = (await this.request(
 			`${jobPathToApiPath(jobPath)}/api/json`,
 			{
 				query: {
-					tree: "name,fullName,url,color,_class,description,buildable,lastBuild[number,url,result,building,timestamp],lastSuccessfulBuild[number,url,result],lastCompletedBuild[number,url,result],healthReport[score,description]",
+					tree: buildJobInfoTree(includeParameters),
 				},
 			},
-		)) as Record<string, unknown>;
+		)) as {
+			name?: string;
+			fullName?: string;
+			url?: string;
+			color?: string;
+			_class?: string;
+			description?: unknown;
+			buildable?: unknown;
+			lastBuild?: unknown;
+			lastSuccessfulBuild?: unknown;
+			lastCompletedBuild?: unknown;
+			healthReport?: unknown;
+			property?: JobApiProperty[];
+		};
 
 		return {
 			jobPath,
@@ -80,10 +121,13 @@ export class JenkinsClient {
 			lastSuccessfulBuild: data.lastSuccessfulBuild,
 			lastCompletedBuild: data.lastCompletedBuild,
 			healthReport: data.healthReport,
+			...(includeParameters
+				? { parameterDefinitions: normalizeJobParameterDefinitions(data.property) }
+				: {}),
 		};
 	}
 
-	async listBuilds(jobPathInput: string, limit = 10): Promise<Array<Record<string, unknown>>> {
+	async listBuilds(jobPathInput: string, limit = 10): Promise<NormalizedBuildSummary[]> {
 		const jobPath = normalizeJobPath(jobPathInput);
 		const data = (await this.request(
 			`${jobPathToApiPath(jobPath)}/api/json`,
@@ -97,7 +141,7 @@ export class JenkinsClient {
 		return (data.builds ?? []).slice(0, limit).map((build) => normalizeBuild(build, jobPath));
 	}
 
-	async getBuild(refInput: string): Promise<Record<string, unknown>> {
+	async getBuild(refInput: string): Promise<NormalizedBuildInfo> {
 		const ref = parseRef(refInput);
 		if (ref.kind === "queue") {
 			const queue = await this.getQueueItem(ref.id);
@@ -137,12 +181,12 @@ export class JenkinsClient {
 			body.set(key, value);
 		}
 
-			const response = (await this.request(endpoint, {
-				method: "POST",
-				body,
-				expect: "none",
-				mutate: true,
-			})) as Response;
+		const response = (await this.request(endpoint, {
+			method: "POST",
+			body,
+			expect: "none",
+			mutate: true,
+		})) as Response;
 
 		const location = response.headers.get("location");
 		return {
@@ -216,30 +260,19 @@ export class JenkinsClient {
 		}
 	}
 
-	async waitForRef(
-		refInput: string,
-		options: { intervalMs?: number; waitTimeoutMs?: number } = {},
-	): Promise<Record<string, unknown>> {
+	async waitForRef(refInput: string, options: WaitOptions = {}): Promise<NormalizedBuildInfo> {
 		const ref = parseRef(refInput);
-		const deadline = Date.now() + (options.waitTimeoutMs ?? 10 * 60_000);
 
 		if (ref.kind === "queue") {
 			const executable = await this.waitForExecutable(ref.id, {
 				intervalMs: options.intervalMs,
 				waitTimeoutMs: options.waitTimeoutMs,
+				onProgress: options.onProgress,
 			});
-			return this.waitForRef(executable.url, options);
+			return this.waitForBuild(executable.url, options, false);
 		}
 
-		while (Date.now() < deadline) {
-			const build = await this.getBuild(formatBuildRef(ref));
-			if (build.building !== true) {
-				return build;
-			}
-			await sleep(options.intervalMs ?? 2_000);
-		}
-
-		throw new CliError(`Timed out waiting for ${refInput}`, ExitCode.Timeout);
+		return this.waitForBuild(formatBuildRef(ref), options);
 	}
 
 	async getQueueItem(id: number): Promise<QueueItem> {
@@ -254,25 +287,79 @@ export class JenkinsClient {
 
 	private async waitForExecutable(
 		id: number,
-		options: { intervalMs?: number; waitTimeoutMs?: number } = {},
-	): Promise<{ number: number; url: string }> {
-		const deadline = Date.now() + (options.waitTimeoutMs ?? 10 * 60_000);
+		options: WaitOptions = {},
+	): Promise<{ number: number; url: string; jobPath?: string }> {
+		const { deadline, intervalMs } = resolveWaitTiming(options);
+		let lastQueueEventKey: string | undefined;
 
 		while (Date.now() < deadline) {
 			const item = await this.getQueueItem(id);
 			if (item.cancelled) {
 				throw new CliError(`Queue item ${id} was cancelled`, ExitCode.ApiError);
 			}
+
+			const queuedEvent = createQueueWaitEvent(id, item);
+			const queueEventKey = queueWaitEventKey(queuedEvent);
+			if (queueEventKey !== lastQueueEventKey) {
+				options.onProgress?.(queuedEvent);
+				lastQueueEventKey = queueEventKey;
+			}
+
 			if (item.executable?.url && item.executable.number !== undefined) {
+				const startedEvent = createStartedWaitEvent(
+					{
+						jobPath: queuedEvent.jobPath,
+						number: item.executable.number,
+						url: item.executable.url,
+					},
+					id,
+				);
+				options.onProgress?.(startedEvent);
 				return {
 					number: item.executable.number,
 					url: item.executable.url,
+					jobPath: queuedEvent.jobPath,
 				};
 			}
-			await sleep(options.intervalMs ?? 2_000);
+			await sleep(intervalMs);
 		}
 
 		throw new CliError(`Timed out waiting for queue item ${id}`, ExitCode.Timeout);
+	}
+
+	private async waitForBuild(
+		refInput: string,
+		options: WaitOptions = {},
+		emitStarted = true,
+	): Promise<NormalizedBuildInfo> {
+		const { deadline, intervalMs } = resolveWaitTiming(options);
+		let didEmitStarted = !emitStarted;
+		let lastRunningEventKey: string | undefined;
+
+		while (Date.now() < deadline) {
+			const build = await this.getBuild(refInput);
+
+			if (!didEmitStarted) {
+				options.onProgress?.(createStartedWaitEvent(build));
+				didEmitStarted = true;
+			}
+
+			if (build.building) {
+				const runningEvent = createRunningWaitEvent(build);
+				const runningEventKey = runningWaitEventKey(runningEvent);
+				if (runningEventKey !== lastRunningEventKey) {
+					options.onProgress?.(runningEvent);
+					lastRunningEventKey = runningEventKey;
+				}
+				await sleep(intervalMs);
+				continue;
+			}
+
+			options.onProgress?.(createFinishedWaitEvent(build));
+			return build;
+		}
+
+		throw new CliError(`Timed out waiting for ${refInput}`, ExitCode.Timeout);
 	}
 
 	private async fetchJobs(jobPath?: string): Promise<JobApiSummary[]> {
@@ -497,4 +584,22 @@ export class JenkinsClient {
 
 		return url.toString();
 	}
+}
+
+function resolveWaitTiming(options: WaitOptions): { deadline: number; intervalMs: number } {
+	return {
+		deadline: Date.now() + (options.waitTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
+		intervalMs: options.intervalMs ?? DEFAULT_WAIT_INTERVAL_MS,
+	};
+}
+
+function buildJobInfoTree(includeParameters: boolean): string {
+	const base =
+		"name,fullName,url,color,_class,description,buildable,lastBuild[number,url,result,building,timestamp],lastSuccessfulBuild[number,url,result],lastCompletedBuild[number,url,result],healthReport[score,description]";
+
+	if (!includeParameters) {
+		return base;
+	}
+
+	return `${base},property[_class,parameterDefinitions[name,description,type,_class,defaultValue,defaultParameterValue[value],choices]]`;
 }

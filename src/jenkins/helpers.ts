@@ -1,4 +1,11 @@
-import type { BuildApiInfo, BuildApiSummary, JobApiSummary } from "./types.ts";
+import type {
+	BuildApiInfo,
+	BuildApiSummary,
+	JobApiSummary,
+	NormalizedBuildInfo,
+	NormalizedBuildSummary,
+	NormalizedJob,
+} from "./types.ts";
 
 export function isContainerJob(job: JobApiSummary): boolean {
 	return Boolean(job._class && /Folder|ComputedFolder|OrganizationFolder/.test(job._class));
@@ -16,7 +23,7 @@ export function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function normalizeJob(job: JobApiSummary): Record<string, unknown> {
+export function normalizeJob(job: JobApiSummary): NormalizedJob {
 	return {
 		name: job.name,
 		fullName: job.fullName ?? job.name,
@@ -26,7 +33,7 @@ export function normalizeJob(job: JobApiSummary): Record<string, unknown> {
 	};
 }
 
-export function normalizeBuild(build: BuildApiSummary, jobPath?: string): Record<string, unknown> {
+export function normalizeBuild(build: BuildApiSummary, jobPath?: string): NormalizedBuildSummary {
 	return {
 		jobPath,
 		number: build.number,
@@ -41,7 +48,7 @@ export function normalizeBuild(build: BuildApiSummary, jobPath?: string): Record
 	};
 }
 
-export function normalizeBuildInfo(build: BuildApiInfo, jobPath?: string): Record<string, unknown> {
+export function normalizeBuildInfo(build: BuildApiInfo, jobPath?: string): NormalizedBuildInfo {
 	const parameters = (build.actions ?? [])
 		.flatMap((action) => action.parameters ?? [])
 		.filter((param) => param.name)

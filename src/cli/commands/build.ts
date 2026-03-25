@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import { createWaitProgressReporter } from "../wait-progress.ts";
 import { loadRuntime } from "../context.ts";
 import { CliError, ExitCode } from "../errors.ts";
 import { emitData, printStdout } from "../io.ts";
@@ -46,6 +47,7 @@ export function registerBuildCommand(program: Command): void {
 		.option("--param <key=value>", "build parameter", collectParams, [] as string[])
 		.option("--params-json <json>", "JSON object of build parameters")
 		.option("--wait", "wait until the build completes")
+		.option("--progress", "stream wait progress to stderr")
 		.option("--poll-ms <ms>", "poll interval while waiting", (value) => Number.parseInt(value, 10), 2_000)
 		.option(
 			"--wait-timeout-ms <ms>",
@@ -60,12 +62,16 @@ export function registerBuildCommand(program: Command): void {
 					param: string[];
 					paramsJson?: string;
 					wait?: boolean;
+					progress?: boolean;
 					pollMs: number;
 					waitTimeoutMs: number;
 				},
 			) => {
 				const runtime = await loadRuntime(program);
 				const params = parseBuildParams(options.param, options.paramsJson);
+				if (options.progress && !options.wait) {
+					throw new CliError("--progress requires --wait", ExitCode.BadArgs);
+				}
 				const triggered = await runtime.client.triggerBuild(job, params);
 
 				if (!options.wait) {
@@ -90,6 +96,7 @@ export function registerBuildCommand(program: Command): void {
 				const buildInfo = await runtime.client.waitForRef(waitRef, {
 					intervalMs: options.pollMs,
 					waitTimeoutMs: options.waitTimeoutMs,
+					onProgress: createWaitProgressReporter(runtime.ctx, options.progress ?? false),
 				});
 				const data = {
 					triggered,

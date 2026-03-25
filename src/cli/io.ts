@@ -55,6 +55,14 @@ export function note(ctx: CliContext, message: string): void {
 	writeStderr(withColor(ctx, "cyan", message));
 }
 
+export function status(ctx: CliContext, message: string): void {
+	if (ctx.quiet) {
+		return;
+	}
+
+	writeStderr(withColor(ctx, "dim", message));
+}
+
 export function debug(ctx: CliContext, message: string): void {
 	if (ctx.json || !ctx.verbose) {
 		return;

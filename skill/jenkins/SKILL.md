@@ -16,12 +16,12 @@ jenkins doctor
 ## Commands
 
 - `jenkins jobs ls [path]` list jobs at the root or in a folder job
-- `jenkins jobs info <job>` inspect one job
+- `jenkins jobs info <job>` inspect one job; add `--parameters` to include parameter definitions
 - `jenkins build ls <job>` list recent builds for a job
 - `jenkins build info <ref>` inspect one build or queue ref
 - `jenkins build trigger <job>` trigger a build, optionally with params
 - `jenkins build logs <ref>` print progressive logs
-- `jenkins wait <ref>` wait until a queue item or build completes
+- `jenkins wait <ref>` wait until a queue item or build completes; add `--progress` to stream wait phases
 - `jenkins result <ref>` fetch the current build result
 - `jenkins cfg ...` manage config
 - `jenkins doctor` run readiness checks
@@ -49,10 +49,37 @@ Add `--wait` if you want the CLI to block until the build finishes:
 ```bash
 jenkins build trigger team-folder/app-build \
   --param BUILD_ENV=staging \
-  --wait
+  --wait \
+  --progress
 ```
 
 Parameter names must match the Jenkins job's parameter names exactly.
+
+Use `jenkins jobs info <job> --parameters` to inspect the available parameter names before triggering a build. When Jenkins exposes them, the CLI includes:
+
+- parameter name
+- parameter type
+- default value
+- choice list
+- description
+
+## Wait Progress
+
+Add `--progress` when waiting if you want live phase updates on stderr while keeping the final result on stdout:
+
+```bash
+jenkins wait queue:123 --progress
+jenkins build trigger team-folder/app-build --wait --progress
+```
+
+On `jenkins build trigger`, `--progress` only makes sense together with `--wait`.
+
+The progress stream covers:
+
+- queued: current queue reason and stuck/blocked state
+- started: build number and URL
+- running: elapsed time versus estimated duration
+- finished: final result and build URL
 
 ## Global flags
 
