@@ -1,6 +1,6 @@
 {
   "name": "@vforsh/jenkins-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bun-based CLI for self-hosted Jenkins instances",
   "type": "module",
   "files": [

@@ -34,10 +34,12 @@ For a Jenkins user account:
 
 1. Sign in to your Jenkins instance.
 2. Open your user settings.
-3. Go to your personal configuration page:
+3. Go to your personal security page:
+   `/me/security/`
+4. If your Jenkins UI does not show API tokens there, check your personal configuration page instead:
    `/me/configure`
-4. In the API token section, create a new token.
-5. Copy it immediately and store it somewhere safe.
+5. In the API token section, create a new token.
+6. Copy it immediately and store it somewhere safe.
 
 Then configure the CLI:
 
