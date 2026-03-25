@@ -1,0 +1,29 @@
+{
+  "name": "@vforsh/jenkins-cli",
+  "version": "0.1.0",
+  "description": "Bun-based CLI for self-hosted Jenkins instances",
+  "type": "module",
+  "files": [
+    "bin",
+    "src",
+    "skill",
+    "README.md"
+  ],
+  "bin": {
+    "jenkins": "bin/jenkins"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test",
+    "cmd": "bun run bin/jenkins"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "picocolors": "^1.1.1",
+    "zod": "^4.3.6"
+  }
+}
