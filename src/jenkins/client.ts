@@ -13,9 +13,11 @@ import {
 } from "./wait-events.ts";
 import type {
 	BuildApiInfo,
+	BuildArtifactApi,
 	BuildApiSummary,
 	JobApiProperty,
 	JobApiSummary,
+	NormalizedBuildArtifact,
 	NormalizedBuildInfo,
 	NormalizedBuildSummary,
 	NormalizedJob,
@@ -163,6 +165,44 @@ export class JenkinsClient {
 		})) as BuildApiInfo;
 
 		return normalizeBuildInfo(data, ref.jobPath);
+	}
+
+	async listArtifacts(refInput: string): Promise<{
+		build: NormalizedBuildSummary;
+		artifacts: NormalizedBuildArtifact[];
+	}> {
+		const ref = parseRef(refInput);
+		const buildRef =
+			ref.kind === "queue"
+				? parseRef((await this.getBuild(refInput)).url ?? refInput)
+				: ref;
+
+		if (buildRef.kind !== "build") {
+			throw new CliError(`Could not resolve build reference: ${refInput}`, ExitCode.BadArgs);
+		}
+
+		const data = (await this.request(this.buildApiPath(buildRef), {
+			query: {
+				tree: "number,url,result,building,timestamp,duration,displayName,fullDisplayName,id,artifacts[fileName,relativePath]",
+			},
+		})) as BuildApiSummary & { artifacts?: BuildArtifactApi[] };
+
+		const build = normalizeBuild(data, buildRef.jobPath);
+		const buildUrl = data.url ?? this.buildUrl(buildRef);
+		if (!buildUrl) {
+			throw new CliError(`Could not resolve build URL for ${refInput}`, ExitCode.BadArgs);
+		}
+
+		return {
+			build,
+			artifacts: normalizeArtifacts(data.artifacts ?? [], buildUrl),
+		};
+	}
+
+	async downloadArtifact(artifactUrl: string): Promise<Uint8Array> {
+		return (await this.requestAbsolute(artifactUrl, {
+			expect: "bytes",
+		})) as Uint8Array;
 	}
 
 	async triggerBuild(jobPathInput: string, params: Record<string, string>): Promise<{
@@ -412,6 +452,8 @@ export class JenkinsClient {
 				return response;
 			case "text":
 				return await response.text();
+			case "bytes":
+				return new Uint8Array(await response.arrayBuffer());
 			case "json": {
 				const text = await response.text();
 				try {
@@ -584,6 +626,32 @@ export class JenkinsClient {
 
 		return url.toString();
 	}
+}
+
+function normalizeArtifacts(items: BuildArtifactApi[], buildUrl: string): NormalizedBuildArtifact[] {
+	return items.flatMap((item) => {
+		if (!item.fileName || !item.relativePath) {
+			return [];
+		}
+
+		return [
+			{
+				fileName: item.fileName,
+				relativePath: item.relativePath,
+				url: buildArtifactUrl(buildUrl, item.relativePath),
+			},
+		];
+	});
+}
+
+function buildArtifactUrl(buildUrl: string, relativePath: string): string {
+	const encodedPath = relativePath
+		.split("/")
+		.filter((part) => part.length > 0)
+		.map((part) => encodeURIComponent(part))
+		.join("/");
+
+	return new URL(`artifact/${encodedPath}`, ensureTrailingSlash(buildUrl)).toString();
 }
 
 function resolveWaitTiming(options: WaitOptions): { deadline: number; intervalMs: number } {

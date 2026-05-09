@@ -106,6 +106,10 @@ Inspect builds:
 jenkins build ls team-folder/app-build --limit 5
 jenkins build info team-folder/app-build#123
 jenkins result team-folder/app-build#123
+jenkins artifacts team-folder/app-build
+jenkins artifacts team-folder/app-build#123
+jenkins artifacts team-folder/app-build#123 --download public.zip
+jenkins artifacts team-folder/app-build#123 --download-all ./artifacts
 ```
 
 Trigger builds:
@@ -137,12 +141,14 @@ jenkins wait queue:123 --progress
 
 `--progress` streams wait-state updates to stderr while keeping the final result on stdout. Queue waits show the current reason, started builds show the build number and URL, running builds show elapsed versus estimated time, and finished builds show the final result.
 
-Accepted ref formats for `build info`, `build logs`, `wait`, and `result`:
+Accepted ref formats for `build info`, `build logs`, `wait`, `result`, and `artifacts`:
 
 - `queue:123`
 - `https://jenkins.example.com/queue/item/123/`
 - `team-folder/app-build#123`
 - `https://jenkins.example.com/job/team-folder/job/app-build/123/`
+
+`jenkins artifacts` also accepts a job path or job URL without a build number and uses the latest build.
 
 ## Output Modes
 

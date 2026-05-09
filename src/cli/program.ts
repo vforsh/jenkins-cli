@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { CliError } from "./errors.ts";
+import { registerArtifactsCommand } from "./commands/artifacts.ts";
 import { registerBuildCommand } from "./commands/build.ts";
 import { registerConfigCommand } from "./commands/config.ts";
 import { registerDoctorCommand } from "./commands/doctor.ts";
@@ -37,6 +38,7 @@ export function buildProgram(): Command {
 
 	registerJobsCommand(program);
 	registerBuildCommand(program);
+	registerArtifactsCommand(program);
 	registerWaitCommand(program);
 	registerResultCommand(program);
 	registerConfigCommand(program);

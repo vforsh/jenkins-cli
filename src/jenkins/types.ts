@@ -2,7 +2,7 @@ export type RequestOptions = {
 	method?: "GET" | "POST";
 	query?: Record<string, string | number | undefined>;
 	body?: URLSearchParams;
-	expect?: "json" | "text" | "none";
+	expect?: "json" | "text" | "none" | "bytes";
 	mutate?: boolean;
 };
 
@@ -112,6 +112,17 @@ export type BuildApiInfo = BuildApiSummary & {
 			value?: unknown;
 		}>;
 	}>;
+};
+
+export type BuildArtifactApi = {
+	fileName?: string;
+	relativePath?: string;
+};
+
+export type NormalizedBuildArtifact = {
+	fileName: string;
+	relativePath: string;
+	url: string;
 };
 
 export type NormalizedBuildInfo = NormalizedBuildSummary & {
