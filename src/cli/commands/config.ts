@@ -13,6 +13,7 @@ import {
 import { redactConfig, resolveEffectiveConfig } from "../../config/effective.ts";
 import { getConfigPath, loadConfig, saveConfig } from "../../config/store.ts";
 import { readStdinString, readStdinTrimmed } from "../../util/stdin.ts";
+import { promptValue } from "../../util/prompt.ts";
 
 export function registerConfigCommand(program: Command): void {
 	const config = program.command("config").alias("cfg").description("Manage Jenkins CLI config");
@@ -68,12 +69,14 @@ export function registerConfigCommand(program: Command): void {
 
 	config
 		.command("set")
-		.description("Set config values. Secrets must be provided via stdin.")
-		.argument("<items...>", "either <key> <value> or key=value pairs")
+		.description("Set config values. Omit a value to enter it interactively.")
+		.argument("<items...>", "either <key>, <key> <value>, or key=value pairs")
 		.action(async (items: string[]) => {
 			const ctx = getConfigContext(program);
 			const current = await loadConfig();
-			const updates = await parseConfigUpdates(items);
+			const updates = await parseConfigUpdates(items, {
+				prompt: (key) => promptConfigValue(key),
+			});
 			const next: Config = { ...current, ...updates };
 
 			await saveConfig(next);
@@ -143,19 +146,38 @@ function configPath(): string {
 	return getConfigPath();
 }
 
-async function parseConfigUpdates(items: string[]): Promise<Partial<Config>> {
+type ConfigUpdateParserOptions = {
+	prompt?: (key: ConfigKey) => Promise<string | null>;
+};
+
+export async function parseConfigUpdates(
+	items: string[],
+	options: ConfigUpdateParserOptions = {},
+): Promise<Partial<Config>> {
 	if (items.length === 0) {
-		throw new CliError("Provide either <key> <value> or key=value pairs", ExitCode.BadArgs);
+		throw new CliError("Provide either <key>, <key> <value>, or key=value pairs", ExitCode.BadArgs);
 	}
 
 	const [first, second] = items;
+	if (items.length === 1 && first && !first.includes("=")) {
+		const key = parseConfigKey(first);
+		const rawValue = await options.prompt?.(key);
+		if (!rawValue) {
+			throw new CliError(
+				`Missing value for ${key}. Use an interactive terminal or pass stdin with: printf 'value' | jenkins cfg set ${key} -`,
+				ExitCode.BadArgs,
+			);
+		}
+
+		return configUpdate(key, rawValue);
+	}
+
 	if (items.length === 2 && first && second && !first.includes("=")) {
 		const key = parseConfigKey(first);
-		const mapped = mapConfigKey(key);
 		const valueArg = second;
 		if (SECRET_KEYS.has(key) && valueArg !== "-") {
 			throw new CliError(
-				`Secret key ${key} must be provided via stdin: printf 'token' | jenkins cfg set ${key} -`,
+				`Secret key ${key} must be provided interactively or via stdin: printf 'token' | jenkins cfg set ${key} -`,
 				ExitCode.BadArgs,
 			);
 		}
@@ -165,9 +187,7 @@ async function parseConfigUpdates(items: string[]): Promise<Partial<Config>> {
 			throw new CliError(`Missing value for ${key}`, ExitCode.BadArgs);
 		}
 
-		return {
-			[mapped]: coerceConfigValue(key, rawValue),
-		} as Partial<Config>;
+		return configUpdate(key, rawValue);
 	}
 
 	const updates: Partial<Config> = {};
@@ -191,6 +211,19 @@ async function parseConfigUpdates(items: string[]): Promise<Partial<Config>> {
 	}
 
 	return updates;
+}
+
+async function promptConfigValue(key: ConfigKey): Promise<string | null> {
+	return promptValue({
+		label: `Enter ${key}`,
+		secret: SECRET_KEYS.has(key),
+	});
+}
+
+function configUpdate(key: ConfigKey, rawValue: string): Partial<Config> {
+	return {
+		[mapConfigKey(key)]: coerceConfigValue(key, rawValue),
+	} as Partial<Config>;
 }
 
 function assignConfigValue(target: Partial<Config>, key: ConfigKey, value: Config[keyof Config]): void {

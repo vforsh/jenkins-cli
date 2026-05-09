@@ -6,6 +6,7 @@ import { resolveEffectiveConfig } from "../src/config/effective.ts";
 import { ExitCode } from "../src/cli/errors.ts";
 import { coerceConfigValue } from "../src/config/schema.ts";
 import { saveConfig } from "../src/config/store.ts";
+import { parseConfigUpdates } from "../src/cli/commands/config.ts";
 
 const ENV_KEYS = [
 	"XDG_CONFIG_HOME",
@@ -70,6 +71,29 @@ describe("config helpers", () => {
 			expect(resolved.config.apiToken).toBe("env-token");
 			expect(resolved.config.timeoutMs).toBe(33000);
 			expect(resolved.config.retries).toBe(2);
+		});
+	});
+
+	it("prompts for a single config key without a value", async () => {
+		const updates = await parseConfigUpdates(["username"], {
+			prompt: async (key) => `${key}-value`,
+		});
+
+		expect(updates).toEqual({ username: "username-value" });
+	});
+
+	it("allows secrets through interactive single-key mode", async () => {
+		const updates = await parseConfigUpdates(["api-token"], {
+			prompt: async () => "secret-token",
+		});
+
+		expect(updates).toEqual({ apiToken: "secret-token" });
+	});
+
+	it("still rejects secrets passed as command arguments", async () => {
+		expect(parseConfigUpdates(["api-token", "secret-token"])).rejects.toMatchObject({
+			exitCode: ExitCode.BadArgs,
+			message: expect.stringContaining("interactively or via stdin"),
 		});
 	});
 });

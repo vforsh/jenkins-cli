@@ -45,6 +45,7 @@ Then configure the CLI:
 
 ```bash
 jenkins cfg set endpoint=https://jenkins.example.com username=alice
+jenkins cfg set api-token
 printf '%s' "$JENKINS_TOKEN" | jenkins cfg set api-token -
 jenkins doctor
 ```
@@ -71,10 +72,11 @@ Supported env vars:
 - `JENKINS_RETRIES`
 - `JENKINS_REGION`
 
-Configure it with stdin-safe secret handling:
+Configure it interactively, or pass secrets through stdin for scripts:
 
 ```bash
 jenkins cfg set endpoint=https://jenkins.example.com username=alice
+jenkins cfg set api-token
 printf '%s' "$JENKINS_TOKEN" | jenkins cfg set api-token -
 jenkins cfg ls
 jenkins doctor
