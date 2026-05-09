@@ -1,6 +1,6 @@
 ---
 name: jenkins
-description: Use the jenkins CLI to inspect jobs, trigger builds, stream logs, wait for completion, and manage config for self-hosted Jenkins instances.
+description: Use the jenkins CLI to inspect jobs, trigger builds, stream logs, wait for completion, download artifacts, and manage config for self-hosted Jenkins instances.
 ---
 
 # jenkins
@@ -21,6 +21,7 @@ jenkins doctor
 - `jenkins build info <ref>` inspect one build or queue ref
 - `jenkins build trigger <job>` trigger a build, optionally with params
 - `jenkins build logs <ref>` print progressive logs
+- `jenkins artifacts <job|ref>` list or download build artifacts
 - `jenkins wait <ref>` wait until a queue item or build completes; add `--progress` to stream wait phases
 - `jenkins result <ref>` fetch the current build result
 - `jenkins cfg ...` manage config
@@ -81,6 +82,36 @@ The progress stream covers:
 - running: elapsed time versus estimated duration
 - finished: final result and build URL
 
+## Artifacts
+
+List artifacts for a specific build:
+
+```bash
+jenkins artifacts team-folder/app-build#123
+```
+
+You can also pass a job path or job URL without a build number; the CLI uses that job's latest build:
+
+```bash
+jenkins artifacts team-folder/app-build
+jenkins artifacts https://jenkins.example.com/job/team-folder/job/app-build/
+```
+
+Download one artifact by exact relative path or unique filename:
+
+```bash
+jenkins artifacts team-folder/app-build#123 --download public.zip
+jenkins artifacts team-folder/app-build#123 --download dist/public.zip --output ./public.zip
+```
+
+Download all artifacts into a directory, preserving Jenkins relative paths:
+
+```bash
+jenkins artifacts team-folder/app-build#123 --download-all ./artifacts
+```
+
+If a filename matches multiple artifacts, use the full relative path shown by `jenkins artifacts`.
+
 ## Global flags
 
 - `--json`
@@ -97,6 +128,8 @@ The progress stream covers:
 - `https://jenkins.example.com/queue/item/123/`
 - `folder/job#123`
 - `https://jenkins.example.com/job/folder/job/job-name/123/`
+
+`jenkins artifacts` also accepts a plain job path or job URL and resolves it to the latest build.
 
 ## Common errors
 
