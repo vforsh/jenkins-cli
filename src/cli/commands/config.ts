@@ -5,6 +5,7 @@ import {
 	CONFIG_KEYS,
 	SECRET_KEYS,
 	coerceConfigValue,
+	configImportSchema,
 	mapConfigKey,
 	parseConfigKey,
 	type Config,
@@ -107,26 +108,23 @@ export function registerConfigCommand(program: Command): void {
 
 	config
 		.command("import")
-		.description("Import config JSON from stdin")
-		.requiredOption("--json", "require JSON stdin input")
+		.description("Import config JSON from stdin (requires --json)")
 		.action(async () => {
-			const ctx = getConfigContext(program);
+			const ctx = getJsonConfigContext(program, "import");
 			const input = await readStdinString();
 			if (!input) {
 				throw new CliError("Expected JSON config payload on stdin", ExitCode.BadArgs);
 			}
 
-			const parsed = JSON.parse(input) as Config;
-			await saveConfig(parsed);
+			await saveConfig(parseConfigImport(input));
 			emitData(ctx, { data: { imported: true, path: configPath() } }, [configPath()]);
 		});
 
 	config
 		.command("export")
-		.description("Export effective config")
-		.requiredOption("--json", "export is JSON-only by design")
+		.description("Export effective config, including secrets (requires --json)")
 		.action(async () => {
-			const ctx = getConfigContext(program);
+			const ctx = getJsonConfigContext(program, "export");
 			const resolved = await resolveEffectiveConfig(ctx);
 			emitData(
 				ctx,
@@ -140,6 +138,28 @@ export function registerConfigCommand(program: Command): void {
 
 function getConfigContext(program: Command) {
 	return toCliContext(program.optsWithGlobals());
+}
+
+function getJsonConfigContext(program: Command, command: "import" | "export") {
+	const ctx = getConfigContext(program);
+	if (!ctx.json) {
+		throw new CliError(`Config ${command} requires --json`, ExitCode.BadArgs);
+	}
+	return ctx;
+}
+
+function parseConfigImport(input: string): Config {
+	let value: unknown;
+	try {
+		value = JSON.parse(input);
+	} catch {
+		throw new CliError("Config import requires valid JSON", ExitCode.BadArgs);
+	}
+	const result = configImportSchema.safeParse(value);
+	if (!result.success) {
+		throw new CliError("Expected a config object or successful config export envelope", ExitCode.BadArgs);
+	}
+	return result.data;
 }
 
 function configPath(): string {

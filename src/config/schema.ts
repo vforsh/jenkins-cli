@@ -15,6 +15,13 @@ export const configSchema = z.object({
 
 export type Config = z.infer<typeof configSchema>;
 
+export const configImportSchema = z.union([
+	configSchema.strict(),
+	z.object({ ok: z.literal(true), data: configSchema.strict() })
+		.strict()
+		.transform((envelope) => envelope.data),
+]);
+
 export type ConfigKey =
 	| "endpoint"
 	| "username"

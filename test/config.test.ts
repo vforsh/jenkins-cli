@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { resolveEffectiveConfig } from "../src/config/effective.ts";
 import { ExitCode } from "../src/cli/errors.ts";
 import { coerceConfigValue } from "../src/config/schema.ts";
-import { saveConfig } from "../src/config/store.ts";
+import { loadConfig, saveConfig } from "../src/config/store.ts";
 import { parseConfigUpdates } from "../src/cli/commands/config.ts";
 
 const ENV_KEYS = [
@@ -98,8 +99,117 @@ describe("config helpers", () => {
 	});
 });
 
+describe("config import/export CLI", () => {
+	const config = {
+		endpoint: "https://jenkins.example.com",
+		username: "test-user",
+		apiToken: "test-token",
+		timeoutMs: 45000,
+		retries: 2,
+		region: "test",
+	};
+
+	for (const alias of ["cfg", "config"]) {
+		for (const position of [0, 1, 2]) {
+			it(`round-trips ${alias} with --json at position ${position}`, async () => {
+				await withTempConfigRoot(async () => {
+					await saveConfig(config);
+					const args = [alias, "export"];
+					args.splice(position, 0, "--json");
+					const exported = await runConfigCli(args);
+					expect(exported.exitCode).toBe(0);
+					expect(exported.stderr).toBe("");
+					expect(JSON.parse(exported.stdout)).toEqual({ ok: true, data: config });
+
+					await saveConfig({ username: "replace-me" });
+					const imported = await runConfigCli(
+						args.map((arg) => (arg === "export" ? "import" : arg)),
+						exported.stdout,
+					);
+					expect(imported.exitCode).toBe(0);
+					expect(JSON.parse(imported.stdout).data.imported).toBe(true);
+					expect(imported.stdout + imported.stderr).not.toContain(config.apiToken);
+					expect(await loadConfig()).toEqual(config);
+				});
+			});
+		}
+	}
+
+	it("accepts a plain config object", async () => {
+		await withTempConfigRoot(async () => {
+			const result = await runConfigCli(["cfg", "import", "--json"], JSON.stringify(config));
+			expect(result.exitCode).toBe(0);
+			expect(await loadConfig()).toEqual(config);
+		});
+	});
+
+	for (const command of ["export", "import"]) {
+		it(`requires explicit --json for ${command} without changing config or exposing secrets`, async () => {
+			await withTempConfigRoot(async () => {
+				await saveConfig(config);
+				const result = await runConfigCli(["cfg", command], "{}");
+				expect(result.exitCode).toBe(ExitCode.BadArgs);
+				expect(result.stderr).toContain("requires --json");
+				expect(result.stdout).toBe("");
+				expect(await loadConfig()).toEqual(config);
+			});
+		});
+
+		it(`rejects --plain with --json for ${command}`, async () => {
+			await withTempConfigRoot(async () => {
+				await saveConfig(config);
+				const result = await runConfigCli(["cfg", command, "--json", "--plain"], "{}");
+				expect(result.exitCode).toBe(ExitCode.BadArgs);
+				expect(JSON.parse(result.stdout).error.message).toContain("Use only one");
+				expect(result.stdout + result.stderr).not.toContain(config.apiToken);
+				expect(await loadConfig()).toEqual(config);
+			});
+		});
+	}
+
+	for (const input of [
+		"",
+		"{",
+		"null",
+		"[]",
+		'{"ok":false,"data":{}}',
+		'{"ok":true}',
+		'{"typo":"value"}',
+		'{"apiToken":42}',
+	]) {
+		it(`rejects invalid import ${JSON.stringify(input)} without overwriting config`, async () => {
+			await withTempConfigRoot(async () => {
+				await saveConfig(config);
+				const result = await runConfigCli(["cfg", "import", "--json"], input);
+				expect(result.exitCode).toBe(ExitCode.BadArgs);
+				expect(JSON.parse(result.stdout).ok).toBe(false);
+				expect(await loadConfig()).toEqual(config);
+			});
+		});
+	}
+});
+
+async function runConfigCli(args: string[], input = "") {
+	const executable = fileURLToPath(new URL("../bin/jenkins", import.meta.url));
+	const child = Bun.spawn([process.execPath, executable, ...args], {
+		env: process.env,
+		stdin: new Blob([input]),
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [exitCode, stdout, stderr] = await Promise.all([
+		child.exited,
+		new Response(child.stdout).text(),
+		new Response(child.stderr).text(),
+	]);
+	return { exitCode, stdout, stderr };
+}
+
 async function withTempConfigRoot(run: () => Promise<void>): Promise<void> {
 	const root = await mkdtemp(join(tmpdir(), "jenkins-cli-test-"));
+	for (const key of ENV_KEYS) {
+		delete process.env[key];
+	}
 	process.env.XDG_CONFIG_HOME = root;
 
 	try {

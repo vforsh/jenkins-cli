@@ -85,8 +85,23 @@ jenkins doctor
 Export and import for machine setup:
 
 ```bash
-jenkins cfg export --json
-cat config.json | jenkins cfg import --json
+umask 077
+jenkins cfg export --json > config.json
+jenkins cfg import --json < config.json
+```
+
+Both commands require the global `--json` flag, which can appear before or after
+the subcommand. Export includes the API token in the standard `{ "ok": true,
+"data": { ... } }` envelope; keep exported files private. Import replaces the
+saved config and accepts either that envelope or a plain config object. Invalid
+JSON, unknown keys, and failed or malformed envelopes are rejected without
+changing the saved config.
+
+To copy config to another machine over SSH without a temporary file:
+
+```bash
+set -o pipefail
+jenkins cfg export --json | ssh macbook 'umask 077; jenkins cfg import --json'
 ```
 
 ## Common Commands
