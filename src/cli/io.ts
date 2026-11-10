@@ -18,14 +18,21 @@ export function toCliContext(raw: GlobalOptions = {}): CliContext {
 		color,
 		endpoint: typeof raw.endpoint === "string" ? raw.endpoint : undefined,
 		region: typeof raw.region === "string" ? raw.region : undefined,
-		timeoutMs: normalizeNumber(raw.timeout),
+		timeoutMs: raw.requestTimeout ?? normalizeNumber(raw.timeout),
+		fields: parseFields(raw.fields),
 		retries: normalizeNumber(raw.retries),
 	};
 }
 
 export function emitData(ctx: CliContext, payload: EmitPayload, plainLines: string[] = []): void {
 	if (ctx.json) {
-		writeStdout(JSON.stringify({ ok: true, data: payload.data }, null, 2));
+		writeStdout(
+			JSON.stringify(
+				{ ok: true, data: ctx.fields ? projectFields(payload.data, ctx.fields) : payload.data },
+				null,
+				2,
+			),
+		);
 		return;
 	}
 
@@ -72,7 +79,7 @@ export function debug(ctx: CliContext, message: string): void {
 }
 
 export function handleFatalError(error: unknown, raw: GlobalOptions | CliContext = {}): never {
-	const ctx = isCliContext(raw) ? raw : toCliContext(raw);
+	const ctx = isCliContext(raw) ? raw : toCliContext({ ...raw, fields: undefined });
 	const cliError = normalizeError(error);
 
 	if (ctx.json) {
@@ -82,6 +89,12 @@ export function handleFatalError(error: unknown, raw: GlobalOptions | CliContext
 					ok: false,
 					error: {
 						message: cliError.message,
+						code: cliError.code,
+						hint: cliError.hint,
+						details:
+							cliError.code === "WAIT_TIMEOUT" || cliError.exitCode === ExitCode.BuildFailed
+								? cliError.details
+								: undefined,
 						exitCode: cliError.exitCode,
 					},
 				},
@@ -94,6 +107,7 @@ export function handleFatalError(error: unknown, raw: GlobalOptions | CliContext
 
 	const prefix = withColor(ctx, "red", "Error:");
 	writeStderr(`${prefix} ${cliError.message}`);
+	if (cliError.hint) writeStderr(cliError.hint);
 
 	if (ctx.verbose && cliError.details !== undefined) {
 		writeStderr(withColor(ctx, "dim", JSON.stringify(cliError.details, null, 2)));
@@ -131,7 +145,7 @@ function normalizeNumber(value: number | string | undefined): number | undefined
 	}
 
 	if (typeof value === "string" && value.trim().length > 0) {
-		const parsed = Number.parseInt(value, 10);
+		const parsed = /^\d+$/u.test(value) ? Number(value) : NaN;
 		return Number.isFinite(parsed) ? parsed : undefined;
 	}
 
@@ -159,4 +173,40 @@ function withColor(ctx: CliContext, color: "red" | "cyan" | "dim", message: stri
 		case "dim":
 			return pc.dim(message);
 	}
+}
+
+function parseFields(input?: string): string[] | undefined {
+	if (input === undefined) return undefined;
+	const fields = input.split(",").map((field) => field.trim());
+	if (
+		fields.some(
+			(field) =>
+				!/^[a-zA-Z][\w]*(?:\.[a-zA-Z][\w]*)*$/u.test(field) ||
+				field.split(".").some((key) => ["__proto__", "constructor", "prototype"].includes(key)),
+		)
+	) {
+		throw new CliError(
+			"--fields requires comma-separated field paths, e.g. number,result,scm.revisions",
+			ExitCode.BadArgs,
+		);
+	}
+	return fields;
+}
+
+function projectFields(value: unknown, fields: string[]): unknown {
+	if (Array.isArray(value)) return value.map((item) => projectFields(item, fields));
+	if (!value || typeof value !== "object") return undefined;
+	const result: Record<string, unknown> = {};
+	for (const root of new Set(fields.map((field) => field.split(".")[0]!))) {
+		const child = (value as Record<string, unknown>)[root];
+		if (fields.includes(root)) {
+			result[root] = child;
+			continue;
+		}
+		const childFields = fields
+			.filter((field) => field.startsWith(root + "."))
+			.map((field) => field.slice(root.length + 1));
+		result[root] = projectFields(child, childFields);
+	}
+	return result;
 }

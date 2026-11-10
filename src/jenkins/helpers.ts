@@ -56,6 +56,10 @@ export function normalizeBuildInfo(build: BuildApiInfo, jobPath?: string): Norma
 
 	return {
 		...normalizeBuild(build, jobPath),
+		ref:
+			jobPath && build.number !== undefined ? `${jobPath}#${build.number}` : (build.url ?? "unknown-build"),
+		state: build.building || build.result == null ? "running" : "finished",
+		complete: !build.building && build.result != null,
 		description: build.description,
 		estimatedDuration: build.estimatedDuration,
 		builtOn: build.builtOn,

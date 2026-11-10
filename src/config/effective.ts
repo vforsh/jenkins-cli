@@ -2,12 +2,7 @@ import { CliError, ExitCode } from "../cli/errors.ts";
 import type { CliContext } from "../cli/types.ts";
 import { redactSecret } from "../util/redact.ts";
 import { getConfigPath, loadConfig } from "./store.ts";
-import {
-	DEFAULT_RETRIES,
-	DEFAULT_TIMEOUT_MS,
-	configSchema,
-	type Config,
-} from "./schema.ts";
+import { DEFAULT_RETRIES, DEFAULT_TIMEOUT_MS, configSchema, type Config } from "./schema.ts";
 
 export type EffectiveConfig = {
 	endpoint: string;
@@ -43,7 +38,13 @@ export async function resolveEffectiveConfig(
 			"retries",
 		),
 	};
-	configSchema.parse(config);
+	const validated = configSchema.safeParse(config);
+	if (!validated.success) {
+		throw new CliError(
+			`Invalid config: ${validated.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`,
+			ExitCode.ConfigError,
+		);
+	}
 
 	return { path, fileConfig, config };
 }
@@ -59,10 +60,7 @@ export function redactConfig(config: EffectiveConfig): Record<string, unknown> {
 	};
 }
 
-function resolveEndpoint(
-	ctx: Pick<CliContext, "endpoint">,
-	fileConfig: Pick<Config, "endpoint">,
-): string {
+function resolveEndpoint(ctx: Pick<CliContext, "endpoint">, fileConfig: Pick<Config, "endpoint">): string {
 	const endpointValue = firstNonEmpty(ctx.endpoint, process.env.JENKINS_ENDPOINT, fileConfig.endpoint);
 	if (!endpointValue) {
 		throw new CliError(
@@ -110,8 +108,8 @@ function parseEnvInt(value: string | undefined, label: string): number | undefin
 		return undefined;
 	}
 
-	const parsed = Number.parseInt(value, 10);
-	if (!Number.isFinite(parsed)) {
+	const parsed = /^\d+$/u.test(value) ? Number(value) : NaN;
+	if (!Number.isSafeInteger(parsed)) {
 		throw new CliError(`${label} env value must be an integer`, ExitCode.ConfigError);
 	}
 	return parsed;

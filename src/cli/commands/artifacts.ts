@@ -88,6 +88,7 @@ async function resolveArtifactRef(client: JenkinsClient, input: string): Promise
 
 function looksLikeBuildOrQueueRef(input: string): boolean {
 	const trimmed = input.trim();
+	// Plain paths, including numeric branch names, retain their historical job meaning.
 	if (/^queue:\d+$/iu.test(trimmed) || trimmed.includes("#")) {
 		return true;
 	}
@@ -116,10 +117,7 @@ function extractLastBuildRef(value: unknown, jobPath: string): string | null {
 	return null;
 }
 
-export function selectArtifact(
-	artifacts: NormalizedBuildArtifact[],
-	query: string,
-): NormalizedBuildArtifact {
+export function selectArtifact(artifacts: NormalizedBuildArtifact[], query: string): NormalizedBuildArtifact {
 	const matches = artifacts.filter(
 		(artifact) => artifact.relativePath === query || artifact.fileName === query,
 	);

@@ -7,6 +7,8 @@ export type GlobalOptions = {
 	endpoint?: string;
 	region?: string;
 	timeout?: number | string;
+	requestTimeout?: number;
+	fields?: string;
 	retries?: number | string;
 };
 
@@ -19,6 +21,7 @@ export type CliContext = {
 	endpoint?: string;
 	region?: string;
 	timeoutMs?: number;
+	fields?: string[];
 	retries?: number;
 };
 

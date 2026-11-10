@@ -9,7 +9,7 @@ export const configSchema = z.object({
 	username: z.string().min(1).optional(),
 	apiToken: z.string().min(1).optional(),
 	region: z.string().min(1).optional(),
-	timeoutMs: z.number().int().positive().optional(),
+	timeoutMs: z.number().int().positive().max(2_147_483_647).optional(),
 	retries: z.number().int().min(0).max(10).optional(),
 });
 
@@ -17,18 +17,13 @@ export type Config = z.infer<typeof configSchema>;
 
 export const configImportSchema = z.union([
 	configSchema.strict(),
-	z.object({ ok: z.literal(true), data: configSchema.strict() })
+	z
+		.object({ ok: z.literal(true), data: configSchema.strict() })
 		.strict()
 		.transform((envelope) => envelope.data),
 ]);
 
-export type ConfigKey =
-	| "endpoint"
-	| "username"
-	| "api-token"
-	| "region"
-	| "timeout-ms"
-	| "retries";
+export type ConfigKey = "endpoint" | "username" | "api-token" | "region" | "timeout-ms" | "retries";
 
 export const CONFIG_KEYS: ConfigKey[] = [
 	"endpoint",
@@ -86,8 +81,8 @@ export function coerceConfigValue(key: ConfigKey, value: string): Config[keyof C
 			return value;
 		case "timeout-ms":
 		case "retries": {
-			const parsed = Number.parseInt(value, 10);
-			if (!Number.isFinite(parsed)) {
+			const parsed = /^\d+$/u.test(value) ? Number(value) : NaN;
+			if (!Number.isSafeInteger(parsed)) {
 				throw new CliError(`${key} must be an integer`, ExitCode.BadArgs);
 			}
 			if (key === "timeout-ms" && parsed <= 0) {

@@ -98,11 +98,16 @@ export function parseRef(input: string): JenkinsRef {
 		}
 	}
 
+	// These commands expect a build ref, so a trailing numeric segment is unambiguous here.
+	const shorthand = trimmed.match(/^(.+)\/(\d+)\/?$/u);
+	if (!isUrl(trimmed) && shorthand) return parseRef(`${shorthand[1]}#${shorthand[2]}`);
+
 	const hashIndex = trimmed.lastIndexOf("#");
 	if (hashIndex > 0) {
 		const jobPath = normalizeJobPath(trimmed.slice(0, hashIndex));
-		const buildNumber = Number.parseInt(trimmed.slice(hashIndex + 1), 10);
-		if (!Number.isFinite(buildNumber)) {
+		const rawNumber = trimmed.slice(hashIndex + 1);
+		const buildNumber = /^\d+$/u.test(rawNumber) ? Number(rawNumber) : NaN;
+		if (!Number.isSafeInteger(buildNumber) || buildNumber < 1) {
 			throw new CliError(
 				`Invalid build reference: ${trimmed}. Expected job/path#123 or a build URL.`,
 				ExitCode.BadArgs,
@@ -118,7 +123,11 @@ export function parseRef(input: string): JenkinsRef {
 
 	throw new CliError(
 		`Unsupported reference: ${trimmed}. Use queue:123, a queue/build URL, or job/path#123.`,
-		ExitCode.BadArgs,
+		{
+			exitCode: ExitCode.BadArgs,
+			code: "INVALID_REF",
+			hint: `For a job, first run: jenkins build ls ${JSON.stringify(trimmed)} --limit 1 --json; then use the returned build URL.`,
+		},
 	);
 }
 

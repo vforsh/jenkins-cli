@@ -1,20 +1,20 @@
 import type { Command } from "commander";
 import { loadRuntime } from "../context.ts";
 import { emitData } from "../io.ts";
+import { checkResult, refSummary } from "../build-options.ts";
 
 export function registerResultCommand(program: Command): void {
 	program
 		.command("result")
-		.description("Fetch the current result for a queue item or build")
-		.argument("<ref>", "queue URL, build URL, queue:123, or job/path#123")
-		.action(async (ref: string) => {
+		.description("Fetch the current queue or build state")
+		.argument("<ref>", "queue/build URL, queue:123, job/path#123 or job/path/123")
+		.option("--check", "exit 9 unless the completed build result is SUCCESS")
+		.action(async (ref: string, options: { check?: boolean }) => {
 			const runtime = await loadRuntime(program);
-			const data = await runtime.client.getBuild(ref);
-			const plain = [`${String(data.result ?? "RUNNING")}\t${String(data.url ?? "")}`];
-			const human = [
-				`${String(data.fullDisplayName ?? data.displayName ?? ref)}`,
-				`Result: ${String(data.result ?? "RUNNING")}`,
-			];
-			emitData(runtime.ctx, { data, human }, plain);
+			const data = await runtime.client.inspectRef(ref);
+			checkResult(data, options.check);
+			emitData(runtime.ctx, { data, human: refSummary(data) }, [
+				`${"result" in data ? (data.result ?? "RUNNING") : data.state.toUpperCase()}\t${data.url ?? data.ref}`,
+			]);
 		});
 }
